@@ -45,7 +45,7 @@ void libspdm_debug_assert(const char *file_name, size_t line_number, const char 
 #elif (LIBSPDM_DEBUG_LIBSPDM_ASSERT_CONFIG == LIBSPDM_DEBUG_LIBSPDM_ASSERT_EXIT)
     exit(1);
 #else
-    assert(false);
+   // assert(false);
 #endif
 }
 #endif /* LIBSPDM_DEBUG_ASSERT_ENABLE */

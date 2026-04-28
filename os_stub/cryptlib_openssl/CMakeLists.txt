@@ -44,6 +44,14 @@ target_sources(cryptlib_openssl
 
 target_compile_options(cryptlib_openssl PRIVATE ${OPENSSL_FLAGS})
 
+# Phase 6: Deprecation-warning gate.
+# -DOPENSSL_API_COMPAT=0x30000000L turns any use of an API deprecated in
+# OpenSSL 3.x into a compiler warning, allowing CI to catch future regressions
+# where a new commit accidentally re-introduces EC_KEY* or other legacy calls.
+# Verified clean after the SM2 OpenSSL Modernization refactor (all EC_KEY*,
+# EVP_PKEY_keygen, paramgen paths removed from sm2.c).
+target_compile_options(cryptlib_openssl PRIVATE -DOPENSSL_API_COMPAT=0x30000000L)
+
 if(ARCH STREQUAL "x64")
     target_compile_options(cryptlib_openssl PRIVATE -DLIBSPDM_CPU_X64)
 elseif(ARCH STREQUAL "ia32")

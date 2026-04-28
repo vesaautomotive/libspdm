@@ -6,58 +6,65 @@
 
 /** @file
  * SM3 digest Wrapper Implementations.
+ *
+ * Lifecycle: new -> init -> update* -> final -> free
+ *   _new     allocates an EVP_MD_CTX; does NOT install the digest algorithm.
+ *   _init    installs EVP_sm3() via EVP_DigestInit_ex; safe to call again to reset.
+ *   _update  feeds data incrementally; NULL data allowed only when data_size == 0.
+ *   _final   writes the 32-byte digest; does not free ctx (caller owns lifetime).
+ *   _free    releases the ctx; NULL-safe.
+ *
+ * Thread safety: a single EVP_MD_CTX must not be shared across threads without
+ * external synchronization. Two threads each with their own context may call
+ * these functions concurrently without coordination.
+ *
+ * ERR queue: this wrapper does not touch the OpenSSL ERR queue on failure;
+ * callers that inspect ERR_peek_error() at their own boundaries see consistent
+ * behavior with all other libspdm_*_hash wrappers.
  **/
 
 #include "internal_crypt_lib.h"
 #include <openssl/evp.h>
 
-void *hash_md_new(void);
-void hash_md_free(const void *md_ctx);
-bool hash_md_init(const EVP_MD *md, void *md_ctx);
-bool hash_md_duplicate(const void *md_ctx, void *new_md_ctx);
-bool hash_md_update(const void *md_ctx, const void *data, size_t data_size);
-bool hash_md_final(const void *md_ctx, void *hash_value);
-bool hash_md_hash_all(const EVP_MD *md, const void *data, size_t data_size,
-                      uint8_t *hash_value);
-
 /**
- * Allocates and initializes one HASH_CTX context for subsequent SM3-256 use.
+ * Allocates one EVP_MD_CTX for subsequent SM3-256 use.
  *
- * @return  Pointer to the HASH_CTX context that has been initialized.
- *         If the allocations fails, libspdm_sm3_256_new() returns NULL.
- *
+ * @return  Pointer to the allocated context, or NULL on allocation failure.
  **/
 void *libspdm_sm3_256_new(void)
 {
-    return hash_md_new();
+    return EVP_MD_CTX_new();
 }
 
 /**
- * Release the specified HASH_CTX context.
+ * Releases the specified EVP_MD_CTX context. NULL-safe.
  *
- * @param[in]  sm3_256_ctx  Pointer to the HASH_CTX context to be released.
- *
+ * @param[in]  sm3_256_ctx  Pointer to the context to be released.
  **/
-void libspdm_sm3_256_free(void *sm3_256_ctx)
+void libspdm_sm3_256_free(void *sm3_context)
 {
-    hash_md_free(sm3_256_ctx);
+    EVP_MD_CTX_free((EVP_MD_CTX *)sm3_context);
 }
 
 /**
- * Initializes user-supplied memory pointed by sm3_context as SM3 hash context for
- * subsequent use.
+ * Initializes sm3_context with EVP_sm3() for subsequent hashing.
  *
  * If sm3_context is NULL, then return false.
  *
- * @param[out]  sm3_context  Pointer to SM3 context being initialized.
+ * @param[out]  sm3_context  Pointer to an allocated SM3 context.
  *
- * @retval true   SM3 context initialization succeeded.
- * @retval false  SM3 context initialization failed.
- *
+ * @retval true   Initialization succeeded.
+ * @retval false  Initialization failed or sm3_context is NULL.
  **/
 bool libspdm_sm3_256_init(void *sm3_context)
 {
-    return hash_md_init (EVP_sm3(), sm3_context);
+    EVP_MD_CTX *ctx = sm3_context;
+
+    if (ctx == NULL) {
+        return false;
+    }
+
+    return EVP_DigestInit_ex(ctx, EVP_sm3(), NULL) == 1;
 }
 
 /**
@@ -65,90 +72,136 @@ bool libspdm_sm3_256_init(void *sm3_context)
  *
  * If sm3_context is NULL, then return false.
  * If new_sm3_context is NULL, then return false.
- * If this interface is not supported, then return false.
+ * Duplicating a context that has not yet been initialized via _init returns false.
  *
- * @param[in]  sm3_context     Pointer to SM3 context being copied.
- * @param[out] new_sm3_context  Pointer to new SM3 context.
+ * @param[in]  sm3_context      Pointer to the source SM3 context.
+ * @param[out] new_sm3_context  Pointer to the destination SM3 context.
  *
- * @retval true   SM3 context copy succeeded.
- * @retval false  SM3 context copy failed.
- * @retval false  This interface is not supported.
- *
+ * @retval true   Copy succeeded.
+ * @retval false  Copy failed, or either pointer is NULL.
  **/
 bool libspdm_sm3_256_duplicate(const void *sm3_context, void *new_sm3_context)
 {
-    return hash_md_duplicate (sm3_context, new_sm3_context);
+    if (sm3_context == NULL || new_sm3_context == NULL) {
+        return false;
+    }
+
+    return EVP_MD_CTX_copy_ex((EVP_MD_CTX *)new_sm3_context,
+                              (const EVP_MD_CTX *)sm3_context) == 1;
 }
 
 /**
- * Digests the input data and updates SM3 context.
+ * Digests the input data and updates the SM3 context.
  *
- * This function performs SM3 digest on a data buffer of the specified size.
- * It can be called multiple times to compute the digest of long or discontinuous data streams.
- * SM3 context should be already correctly initialized by sm3_init(), and should not be finalized
- * by sm3_final(). Behavior with invalid context is undefined.
+ * May be called multiple times. If data is NULL, data_size must be 0
+ * (a no-op that returns true); any other combination returns false.
  *
  * If sm3_context is NULL, then return false.
  *
- * @param[in, out]  sm3_context     Pointer to the SM3 context.
- * @param[in]       data           Pointer to the buffer containing the data to be hashed.
- * @param[in]       data_size       size of data buffer in bytes.
+ * @param[in,out]  sm3_context  Pointer to the SM3 context.
+ * @param[in]      data         Pointer to the data buffer to be hashed.
+ * @param[in]      data_size    Size of data buffer in bytes.
  *
- * @retval true   SM3 data digest succeeded.
- * @retval false  SM3 data digest failed.
- *
+ * @retval true   Digest update succeeded.
+ * @retval false  Digest update failed.
  **/
 bool libspdm_sm3_256_update(void *sm3_context, const void *data,
                             size_t data_size)
 {
-    return hash_md_update (sm3_context, data, data_size);
+    EVP_MD_CTX *ctx = sm3_context;
+
+    if (ctx == NULL) {
+        return false;
+    }
+
+    if (data == NULL) {
+        return data_size == 0;
+    }
+
+    return EVP_DigestUpdate(ctx, data, data_size) == 1;
 }
 
 /**
- * Completes computation of the SM3 digest value.
+ * Completes SM3 computation and writes the 32-byte digest to hash_value.
  *
- * This function completes SM3 hash computation and retrieves the digest value into
- * the specified memory. After this function has been called, the SM3 context cannot
- * be used again.
- * SM3 context should be already correctly initialized by sm3_init(), and should not be
- * finalized by sm3_final(). Behavior with invalid SM3 context is undefined.
+ * The context must not be used for further updates after this call.
+ * The context is not freed here; the caller must call libspdm_sm3_256_free().
  *
  * If sm3_context is NULL, then return false.
  * If hash_value is NULL, then return false.
  *
- * @param[in, out]  sm3_context     Pointer to the SM3 context.
- * @param[out]      hash_value      Pointer to a buffer that receives the SM3 digest
- *                                value (32 bytes).
+ * @param[in,out]  sm3_context  Pointer to the SM3 context.
+ * @param[out]     hash_value   Buffer that receives the SM3 digest (32 bytes).
  *
- * @retval true   SM3 digest computation succeeded.
- * @retval false  SM3 digest computation failed.
- *
+ * @retval true   Digest computation succeeded.
+ * @retval false  Digest computation failed.
  **/
 bool libspdm_sm3_256_final(void *sm3_context, uint8_t *hash_value)
 {
-    return hash_md_final (sm3_context, hash_value);
+    EVP_MD_CTX *ctx = sm3_context;
+    unsigned int out_len = 0;
+
+    if (ctx == NULL || hash_value == NULL) {
+        return false;
+    }
+
+    if (EVP_DigestFinal_ex(ctx, hash_value, &out_len) != 1) {
+        return false;
+    }
+
+    return out_len == LIBSPDM_SM3_256_DIGEST_SIZE;
 }
 
 /**
- * Computes the SM3 message digest of a input data buffer.
+ * Computes the SM3 digest of data in a single call.
  *
- * This function performs the SM3 message digest of a given data buffer, and places
- * the digest value into the specified memory.
+ * If hash_value is NULL, then return false.
+ * If data is NULL, data_size must be 0; the empty-input SM3 digest is returned.
  *
- * If this interface is not supported, then return false.
+ * @param[in]   data        Pointer to the data buffer to be hashed.
+ * @param[in]   data_size   Size of data buffer in bytes.
+ * @param[out]  hash_value  Buffer that receives the SM3 digest (32 bytes).
  *
- * @param[in]   data        Pointer to the buffer containing the data to be hashed.
- * @param[in]   data_size    size of data buffer in bytes.
- * @param[out]  hash_value   Pointer to a buffer that receives the SM3 digest
- *                         value (32 bytes).
- *
- * @retval true   SM3 digest computation succeeded.
- * @retval false  SM3 digest computation failed.
- * @retval false  This interface is not supported.
- *
+ * @retval true   Digest computation succeeded.
+ * @retval false  Digest computation failed.
  **/
 bool libspdm_sm3_256_hash_all(const void *data, size_t data_size,
                               uint8_t *hash_value)
 {
-    return hash_md_hash_all (EVP_sm3(), data, data_size, hash_value);
+    EVP_MD_CTX *ctx = NULL;
+    unsigned int out_len = 0;
+    bool result = false;
+
+    if (hash_value == NULL) {
+        return false;
+    }
+
+    if (data == NULL && data_size != 0) {
+        return false;
+    }
+
+    ctx = EVP_MD_CTX_new();
+    if (ctx == NULL) {
+        return false;
+    }
+
+    if (EVP_DigestInit_ex(ctx, EVP_sm3(), NULL) != 1) {
+        goto cleanup;
+    }
+
+    if (data_size != 0) {
+        if (EVP_DigestUpdate(ctx, data, data_size) != 1) {
+            goto cleanup;
+        }
+    }
+
+    if (EVP_DigestFinal_ex(ctx, hash_value, &out_len) != 1) {
+        goto cleanup;
+    }
+
+    result = (out_len == LIBSPDM_SM3_256_DIGEST_SIZE);
+
+cleanup:
+    EVP_MD_CTX_free(ctx);
+    return result;
 }
