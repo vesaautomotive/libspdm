@@ -27,6 +27,7 @@
 void libspdm_debug_assert(const char *file_name, size_t line_number, const char *description)
 {
     printf("LIBSPDM_ASSERT: %s(%zu): %s\n", file_name, line_number, description);
+    fflush(stdout);
 
 #if (LIBSPDM_DEBUG_LIBSPDM_ASSERT_CONFIG == LIBSPDM_DEBUG_LIBSPDM_ASSERT_DEADLOOP)
     {
@@ -45,7 +46,7 @@ void libspdm_debug_assert(const char *file_name, size_t line_number, const char 
 #elif (LIBSPDM_DEBUG_LIBSPDM_ASSERT_CONFIG == LIBSPDM_DEBUG_LIBSPDM_ASSERT_EXIT)
     exit(1);
 #else
-   // assert(false);
+    assert(false);
 #endif
 }
 #endif /* LIBSPDM_DEBUG_ASSERT_ENABLE */
@@ -80,5 +81,6 @@ void libspdm_debug_print(size_t error_level, const char *format, ...)
     assert(status < sizeof(buffer));
 
     printf("%s", buffer);
+    fflush(stdout);
 }
 #endif /* LIBSPDM_DEBUG_PRINT_ENABLE */

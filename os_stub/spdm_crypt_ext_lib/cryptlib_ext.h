@@ -667,6 +667,22 @@ extern bool libspdm_sm2_dsa_get_pub_key(void *sm2_context, uint8_t *public_key,
                                         size_t *public_key_size);
 
 /**
+ * Gets the private key component from the established sm2 context.
+ *
+ * The private_size is 32. It is the private scalar d.
+ *
+ * @param[in]       sm2_context       Pointer to sm2 context being set.
+ * @param[out]      private_key       Pointer to the buffer to receive private scalar d.
+ * @param[in, out]  private_key_size  On input, the size of private buffer in bytes.
+ *                                    On output, the size of data returned in private buffer.
+ *
+ * @retval  true   sm2 private key component was retrieved successfully.
+ * @retval  false  Invalid sm2 key component.
+ **/
+extern bool libspdm_sm2_dsa_get_priv_key(void *sm2_context, uint8_t *private_key,
+                                         size_t *private_key_size);
+
+/**
  * Validates key components of sm2 context.
  * NOTE: This function performs integrity checks on all the sm2 key material, so
  *       the sm2 key structure must contain all the private key data.

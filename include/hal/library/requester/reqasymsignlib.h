@@ -10,6 +10,22 @@
 #include "hal/base.h"
 #include "internal/libspdm_lib_config.h"
 
+/**
+ * Read requester private key material in PEM format.
+ *
+ * The returned buffer is heap-allocated by the secret library. Caller owns it and
+ * is responsible for clearing and freeing after use.
+ *
+ * @param[in]  req_base_asym_alg  Indicates the requester signing algorithm.
+ * @param[out] data               Pointer to allocated PEM buffer.
+ * @param[out] size               PEM buffer size in bytes.
+ *
+ * @retval true   Key data was returned.
+ * @retval false  Key data is unavailable.
+ */
+extern bool libspdm_requester_read_private_key_pem(uint16_t req_base_asym_alg,
+                                                   void **data, size_t *size);
+
 #if LIBSPDM_ENABLE_CAPABILITY_MUT_AUTH_CAP
 /**
  * Sign an SPDM message data.

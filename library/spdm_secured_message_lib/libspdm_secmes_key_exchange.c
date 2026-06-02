@@ -62,6 +62,27 @@ bool libspdm_secured_message_dhe_generate_key(uint16_t dhe_named_group,
     return libspdm_dhe_generate_key(dhe_named_group, dhe_context, public_key, public_key_size);
 }
 
+bool libspdm_secured_message_dhe_set_static_priv(
+    uint16_t dhe_named_group, void *dhe_context,
+    const uint8_t *priv, size_t priv_size)
+{
+    return libspdm_dhe_set_static_priv(dhe_named_group, dhe_context, priv, priv_size);
+}
+
+bool libspdm_secured_message_dhe_set_static_pub_self(
+    uint16_t dhe_named_group, void *dhe_context,
+    const uint8_t *pub, size_t pub_size)
+{
+    return libspdm_dhe_set_static_pub_self(dhe_named_group, dhe_context, pub, pub_size);
+}
+
+bool libspdm_secured_message_dhe_set_static_pub_peer(
+    uint16_t dhe_named_group, void *dhe_context,
+    const uint8_t *pub, size_t pub_size)
+{
+    return libspdm_dhe_set_static_pub_peer(dhe_named_group, dhe_context, pub, pub_size);
+}
+
 /**
  * Computes exchanged common key,
  * based upon negotiated DHE algorithm.

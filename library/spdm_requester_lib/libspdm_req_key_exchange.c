@@ -6,8 +6,15 @@
 
 #include "internal/libspdm_requester_lib.h"
 #include "internal/libspdm_secured_message_lib.h"
+#include <stdlib.h>
 
 #if LIBSPDM_ENABLE_CAPABILITY_KEY_EX_CAP
+
+#define LIBSPDM_SM2_PRIV_KEY_SIZE 32U
+#define LIBSPDM_SM2_PUB_KEY_SIZE 64U
+
+bool libspdm_read_responder_public_key(uint32_t base_asym_algo,
+                                       void **data, size_t *size);
 
 #pragma pack(1)
 typedef struct {
@@ -35,6 +42,211 @@ typedef struct {
     uint8_t verify_data[LIBSPDM_MAX_HASH_SIZE];
 } libspdm_key_exchange_response_max_t;
 #pragma pack()
+
+static bool libspdm_get_sm2_public_from_der(const uint8_t *der_data,
+                                            size_t der_size,
+                                            uint8_t *pub_xy)
+{
+    void *sm2_context;
+    size_t pub_size;
+    bool result;
+
+    if (der_data == NULL || pub_xy == NULL) {
+        return false;
+    }
+
+    result = libspdm_sm2_get_public_key_from_der(der_data, der_size, &sm2_context);
+    if (!result) {
+        return false;
+    }
+
+    pub_size = LIBSPDM_SM2_PUB_KEY_SIZE;
+    result = libspdm_sm2_dsa_get_pub_key(sm2_context, pub_xy, &pub_size);
+    libspdm_sm2_dsa_free(sm2_context);
+    return result && pub_size == LIBSPDM_SM2_PUB_KEY_SIZE;
+}
+
+static bool libspdm_extract_sm2_static_material_requester(
+    libspdm_context_t *spdm_context, uint8_t local_slot_id,
+    uint8_t *static_priv, uint8_t *static_pub_self, uint8_t *static_pub_peer)
+{
+    bool result;
+    void *private_pem;
+    size_t private_pem_size;
+    void *sm2_context;
+    size_t key_size;
+    const void *peer_cert_chain_buffer;
+    size_t peer_cert_chain_buffer_size;
+    const void *local_cert_chain_buffer;
+    size_t local_cert_chain_buffer_size;
+    uint8_t peer_slot_id;
+
+    if (spdm_context == NULL || static_priv == NULL || static_pub_self == NULL ||
+        static_pub_peer == NULL) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR, "extract_sm2_static_req: invalid input pointers\n"));
+        return false;
+    }
+
+    result = libspdm_requester_read_private_key_pem(
+        (uint16_t)spdm_context->connection_info.algorithm.base_asym_algo,
+        &private_pem, &private_pem_size);
+    if (!result) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "extract_sm2_static_req: requester_read_private_key_pem failed base_asym=0x%x\n",
+                       spdm_context->connection_info.algorithm.base_asym_algo));
+        return false;
+    }
+
+    result = libspdm_sm2_get_private_key_from_pem(
+        private_pem, private_pem_size, NULL, &sm2_context);
+    if (!result) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "extract_sm2_static_req: sm2_get_private_key_from_pem failed pem_size=0x%zx\n",
+                       private_pem_size));
+        libspdm_zero_mem(private_pem, private_pem_size);
+        free(private_pem);
+        return false;
+    }
+
+    key_size = LIBSPDM_SM2_PRIV_KEY_SIZE;
+    result = libspdm_sm2_dsa_get_priv_key(sm2_context, static_priv, &key_size);
+    if (!result || key_size != LIBSPDM_SM2_PRIV_KEY_SIZE) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "extract_sm2_static_req: sm2_dsa_get_priv_key failed result=%d key_size=0x%zx\n",
+                       result, key_size));
+        libspdm_req_asym_free(
+            (uint16_t)spdm_context->connection_info.algorithm.base_asym_algo, sm2_context);
+        libspdm_zero_mem(private_pem, private_pem_size);
+        free(private_pem);
+        return false;
+    }
+
+    key_size = LIBSPDM_SM2_PUB_KEY_SIZE;
+    result = libspdm_sm2_dsa_get_pub_key(sm2_context, static_pub_self, &key_size);
+    libspdm_req_asym_free(
+        (uint16_t)spdm_context->connection_info.algorithm.base_asym_algo, sm2_context);
+    libspdm_zero_mem(private_pem, private_pem_size);
+    free(private_pem);
+    if (!result || key_size != LIBSPDM_SM2_PUB_KEY_SIZE) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "extract_sm2_static_req: sm2_dsa_get_pub_key(self) failed result=%d key_size=0x%zx\n",
+                       result, key_size));
+        return false;
+    }
+
+    if (local_slot_id < SPDM_MAX_SLOT_COUNT) {
+        local_cert_chain_buffer = spdm_context->local_context.local_cert_chain_provision[local_slot_id];
+        local_cert_chain_buffer_size =
+            spdm_context->local_context.local_cert_chain_provision_size[local_slot_id];
+        if (local_cert_chain_buffer != NULL && local_cert_chain_buffer_size != 0) {
+            void *pub_context;
+            const uint8_t *leaf_cert;
+            size_t leaf_cert_size;
+            key_size = LIBSPDM_SM2_PUB_KEY_SIZE;
+            result = libspdm_x509_get_cert_from_cert_chain(
+                local_cert_chain_buffer, local_cert_chain_buffer_size, -1,
+                &leaf_cert, &leaf_cert_size);
+            if (result) {
+                result = libspdm_asym_get_public_key_from_x509(
+                    spdm_context->connection_info.algorithm.base_asym_algo,
+                    leaf_cert, leaf_cert_size, &pub_context);
+            }
+            if (result) {
+                result = libspdm_sm2_dsa_get_pub_key(pub_context, static_pub_self, &key_size);
+                libspdm_asym_free(spdm_context->connection_info.algorithm.base_asym_algo, pub_context);
+                if (!result || key_size != LIBSPDM_SM2_PUB_KEY_SIZE) {
+                    LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                                   "extract_sm2_static_req: sm2_dsa_get_pub_key(self from local cert) failed result=%d key_size=0x%zx\n",
+                                   result, key_size));
+                    return false;
+                }
+            }
+        }
+    }
+
+    peer_slot_id = spdm_context->connection_info.peer_used_cert_chain_slot_id;
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "extract_sm2_static_req: peer_slot_id=0x%x peer_public_key_provision=%p size=0x%zx\n",
+                   peer_slot_id,
+                   spdm_context->local_context.peer_public_key_provision,
+                   spdm_context->local_context.peer_public_key_provision_size));
+    if (spdm_context->local_context.peer_public_key_provision != NULL &&
+        spdm_context->local_context.peer_public_key_provision_size != 0) {
+        result = libspdm_get_sm2_public_from_der(
+            spdm_context->local_context.peer_public_key_provision,
+            spdm_context->local_context.peer_public_key_provision_size,
+            static_pub_peer);
+        if (!result) {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                           "extract_sm2_static_req: get_sm2_public_from_der(peer public key provision) failed size=0x%zx\n",
+                           spdm_context->local_context.peer_public_key_provision_size));
+        }
+        return result;
+    }
+
+    result = libspdm_get_peer_cert_chain_buffer(
+        spdm_context, &peer_cert_chain_buffer, &peer_cert_chain_buffer_size);
+    if (!result) {
+        void *peer_pub_der;
+        size_t peer_pub_der_size;
+        peer_pub_der = NULL;
+        peer_pub_der_size = 0;
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "extract_sm2_static_req: get_peer_cert_chain_buffer failed (peer_slot=0x%x), trying responder public key file fallback\n",
+                       peer_slot_id));
+        result = libspdm_read_responder_public_key(
+            spdm_context->connection_info.algorithm.base_asym_algo,
+            &peer_pub_der, &peer_pub_der_size);
+        if (!result || peer_pub_der == NULL || peer_pub_der_size == 0) {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                           "extract_sm2_static_req: responder public key fallback read failed result=%d size=0x%zx base_asym=0x%x\n",
+                           result, peer_pub_der_size,
+                           spdm_context->connection_info.algorithm.base_asym_algo));
+            return false;
+        }
+        result = libspdm_get_sm2_public_from_der(peer_pub_der, peer_pub_der_size, static_pub_peer);
+        free(peer_pub_der);
+        if (!result) {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                           "extract_sm2_static_req: responder public key fallback parse failed size=0x%zx\n",
+                           peer_pub_der_size));
+            return false;
+        }
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "extract_sm2_static_req: responder public key fallback succeeded size=0x%zx\n",
+                       peer_pub_der_size));
+        return true;
+    }
+
+    {
+        void *pub_context;
+        const uint8_t *leaf_cert;
+        size_t leaf_cert_size;
+        key_size = LIBSPDM_SM2_PUB_KEY_SIZE;
+        result = libspdm_x509_get_cert_from_cert_chain(
+            peer_cert_chain_buffer, peer_cert_chain_buffer_size, -1,
+            &leaf_cert, &leaf_cert_size);
+        if (result) {
+            result = libspdm_asym_get_public_key_from_x509(
+                spdm_context->connection_info.algorithm.base_asym_algo,
+                leaf_cert, leaf_cert_size, &pub_context);
+        }
+        if (!result) {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                           "extract_sm2_static_req: get leaf/pub_context from peer cert failed\n"));
+            return false;
+        }
+        result = libspdm_sm2_dsa_get_pub_key(pub_context, static_pub_peer, &key_size);
+        libspdm_asym_free(spdm_context->connection_info.algorithm.base_asym_algo, pub_context);
+        if (!result || key_size != LIBSPDM_SM2_PUB_KEY_SIZE) {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                           "extract_sm2_static_req: sm2_dsa_get_pub_key(peer) failed result=%d key_size=0x%zx\n",
+                           result, key_size));
+            return false;
+        }
+        return true;
+    }
+}
 
 bool libspdm_verify_key_exchange_rsp_hmac(libspdm_context_t *spdm_context,
                                           libspdm_session_info_t *session_info,
@@ -754,6 +966,61 @@ static libspdm_return_t libspdm_try_send_receive_key_exchange(
         goto receive_done;
     }
 
+    if (spdm_context->connection_info.algorithm.dhe_named_group ==
+        SPDM_ALGORITHMS_DHE_NAMED_GROUP_SM2_P256) {
+        uint8_t local_slot_id;
+        uint8_t static_priv[LIBSPDM_SM2_PRIV_KEY_SIZE];
+        uint8_t static_pub_self[LIBSPDM_SM2_PUB_KEY_SIZE];
+        uint8_t static_pub_peer[LIBSPDM_SM2_PUB_KEY_SIZE];
+
+        local_slot_id = 0;
+        if ((mut_auth_requested != 0) && (*req_slot_id_param < SPDM_MAX_SLOT_COUNT)) {
+            local_slot_id = *req_slot_id_param;
+        }
+
+        result = libspdm_extract_sm2_static_material_requester(
+            spdm_context, local_slot_id, static_priv, static_pub_self, static_pub_peer);
+        {
+            bool sm2_extract_ok;
+            bool set_static_priv_ok;
+            bool set_static_pub_self_ok;
+            bool set_static_pub_peer_ok;
+
+            sm2_extract_ok = result;
+            set_static_priv_ok = sm2_extract_ok &&
+                libspdm_secured_message_dhe_set_static_priv(
+                    spdm_context->connection_info.algorithm.dhe_named_group,
+                    dhe_context, static_priv, sizeof(static_priv));
+            set_static_pub_self_ok = set_static_priv_ok &&
+                libspdm_secured_message_dhe_set_static_pub_self(
+                    spdm_context->connection_info.algorithm.dhe_named_group,
+                    dhe_context, static_pub_self, sizeof(static_pub_self));
+            set_static_pub_peer_ok = set_static_pub_self_ok &&
+                libspdm_secured_message_dhe_set_static_pub_peer(
+                    spdm_context->connection_info.algorithm.dhe_named_group,
+                    dhe_context, static_pub_peer, sizeof(static_pub_peer));
+
+            if (!set_static_pub_peer_ok) {
+            libspdm_zero_mem(static_priv, sizeof(static_priv));
+            libspdm_zero_mem(static_pub_self, sizeof(static_pub_self));
+            libspdm_zero_mem(static_pub_peer, sizeof(static_pub_peer));
+            libspdm_free_session_id(spdm_context, *session_id);
+            libspdm_secured_message_dhe_free(
+                spdm_context->connection_info.algorithm.dhe_named_group, dhe_context);
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                           "req_key_exchange: crypto_error -> SM2 static material/setup failed "
+                           "(extract=%d set_priv=%d set_pub_self=%d set_pub_peer=%d local_slot=%u mut_auth=%u req_slot_id=%u)\n",
+                           sm2_extract_ok, set_static_priv_ok, set_static_pub_self_ok, set_static_pub_peer_ok,
+                           local_slot_id, mut_auth_requested, *req_slot_id_param));
+            status = LIBSPDM_STATUS_CRYPTO_ERROR;
+            goto receive_done;
+            }
+        }
+        libspdm_zero_mem(static_priv, sizeof(static_priv));
+        libspdm_zero_mem(static_pub_self, sizeof(static_pub_self));
+        libspdm_zero_mem(static_pub_peer, sizeof(static_pub_peer));
+    }
+
     result = libspdm_secured_message_dhe_compute_key(
         spdm_context->connection_info.algorithm.dhe_named_group,
         dhe_context, spdm_response->exchange_data, dhe_key_size,
@@ -762,6 +1029,9 @@ static libspdm_return_t libspdm_try_send_receive_key_exchange(
         spdm_context->connection_info.algorithm.dhe_named_group, dhe_context);
     if (!result) {
         libspdm_free_session_id(spdm_context, *session_id);
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "req_key_exchange: crypto_error -> dhe_compute_key failed group=0x%x\n",
+                       spdm_context->connection_info.algorithm.dhe_named_group));
         status = LIBSPDM_STATUS_CRYPTO_ERROR;
         goto receive_done;
     }
@@ -771,6 +1041,8 @@ static libspdm_return_t libspdm_try_send_receive_key_exchange(
     result = libspdm_calculate_th1_hash(spdm_context, session_info, true, th1_hash_data);
     if (!result) {
         libspdm_free_session_id(spdm_context, *session_id);
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "req_key_exchange: crypto_error -> calculate_th1_hash failed\n"));
         status = LIBSPDM_STATUS_CRYPTO_ERROR;
         goto receive_done;
     }
@@ -778,6 +1050,8 @@ static libspdm_return_t libspdm_try_send_receive_key_exchange(
         session_info->secured_message_context, th1_hash_data);
     if (!result) {
         libspdm_free_session_id(spdm_context, *session_id);
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "req_key_exchange: crypto_error -> generate_session_handshake_key failed\n"));
         status = LIBSPDM_STATUS_CRYPTO_ERROR;
         goto receive_done;
     }

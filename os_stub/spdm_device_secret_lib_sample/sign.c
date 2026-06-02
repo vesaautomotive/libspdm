@@ -18,6 +18,19 @@
 #include "spdm_device_secret_lib_internal.h"
 #include "internal/libspdm_common_lib.h"
 
+bool libspdm_requester_read_private_key_pem(uint16_t req_base_asym_alg,
+                                            void **data, size_t *size)
+{
+#if LIBSPDM_PRIVATE_KEY_MODE_RAW_KEY_ONLY
+    return false;
+#else
+    if (data == NULL || size == NULL || !g_private_key_mode) {
+        return false;
+    }
+    return libspdm_read_requester_private_key(req_base_asym_alg, data, size);
+#endif
+}
+
 #if LIBSPDM_ENABLE_CAPABILITY_MUT_AUTH_CAP
 bool libspdm_requester_data_sign(
 #if LIBSPDM_HAL_PASS_SPDM_CONTEXT
@@ -100,6 +113,19 @@ bool libspdm_requester_data_sign(
     return result;
 }
 #endif /* LIBSPDM_ENABLE_CAPABILITY_MUT_AUTH_CAP */
+
+bool libspdm_responder_read_private_key_pem(uint32_t base_asym_algo,
+                                            void **data, size_t *size)
+{
+#if LIBSPDM_PRIVATE_KEY_MODE_RAW_KEY_ONLY
+    return false;
+#else
+    if (data == NULL || size == NULL || !g_private_key_mode) {
+        return false;
+    }
+    return libspdm_read_responder_private_key(base_asym_algo, data, size);
+#endif
+}
 
 bool libspdm_responder_data_sign(
 #if LIBSPDM_HAL_PASS_SPDM_CONTEXT

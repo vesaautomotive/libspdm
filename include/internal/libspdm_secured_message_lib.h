@@ -213,6 +213,18 @@ bool libspdm_secured_message_dhe_generate_key(uint16_t dhe_named_group,
                                               uint8_t *public_key,
                                               size_t *public_key_size);
 
+bool libspdm_secured_message_dhe_set_static_priv(
+    uint16_t dhe_named_group, void *dhe_context,
+    const uint8_t *priv, size_t priv_size);
+
+bool libspdm_secured_message_dhe_set_static_pub_self(
+    uint16_t dhe_named_group, void *dhe_context,
+    const uint8_t *pub, size_t pub_size);
+
+bool libspdm_secured_message_dhe_set_static_pub_peer(
+    uint16_t dhe_named_group, void *dhe_context,
+    const uint8_t *pub, size_t pub_size);
+
 /**
  * Computes exchanged common key,
  * based upon negotiated DHE algorithm.

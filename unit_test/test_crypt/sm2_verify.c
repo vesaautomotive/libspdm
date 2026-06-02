@@ -10,6 +10,86 @@
 
 #define DEFAULT_SM2_ID "1234567812345678"
 
+#if LIBSPDM_SM2_DSA_SUPPORT
+bool libspdm_test_ecc_sig_bin_to_der(const uint8_t *signature, size_t sig_size,
+                                     uint8_t *der, size_t *der_len_in_out);
+
+static bool libspdm_validate_crypt_sm2_negative_verify_cases(
+    void *sm2_context, const uint8_t *message, size_t message_size,
+    const uint8_t *signature, size_t sig_size)
+{
+    bool status;
+    uint8_t tampered_signature[66 * 2];
+    const uint8_t wrong_id[] = "wrong-id";
+    uint8_t short_der[8];
+    uint8_t expected_short_der[8];
+    size_t short_der_size;
+
+    if (sm2_context == NULL || message == NULL || signature == NULL) {
+        return false;
+    }
+
+    if (sig_size != 64) {
+        return false;
+    }
+
+    status = libspdm_sm2_dsa_verify(sm2_context, LIBSPDM_CRYPTO_NID_SM3_256,
+                                    (const uint8_t *)DEFAULT_SM2_ID,
+                                    sizeof(DEFAULT_SM2_ID) - 1,
+                                    message, message_size, signature, 0);
+    if (status) {
+        return false;
+    }
+
+    status = libspdm_sm2_dsa_verify(sm2_context, LIBSPDM_CRYPTO_NID_SM3_256,
+                                    (const uint8_t *)DEFAULT_SM2_ID,
+                                    sizeof(DEFAULT_SM2_ID) - 1,
+                                    message, message_size, signature, 63);
+    if (status) {
+        return false;
+    }
+
+    status = libspdm_sm2_dsa_verify(sm2_context, LIBSPDM_CRYPTO_NID_SM3_256,
+                                    (const uint8_t *)DEFAULT_SM2_ID,
+                                    sizeof(DEFAULT_SM2_ID) - 1,
+                                    message, message_size, signature, 65);
+    if (status) {
+        return false;
+    }
+
+    libspdm_copy_mem(tampered_signature, sizeof(tampered_signature),
+                     signature, sig_size);
+    tampered_signature[0] ^= 0x01;
+    status = libspdm_sm2_dsa_verify(sm2_context, LIBSPDM_CRYPTO_NID_SM3_256,
+                                    (const uint8_t *)DEFAULT_SM2_ID,
+                                    sizeof(DEFAULT_SM2_ID) - 1,
+                                    message, message_size,
+                                    tampered_signature, sig_size);
+    if (status) {
+        return false;
+    }
+
+    status = libspdm_sm2_dsa_verify(sm2_context, LIBSPDM_CRYPTO_NID_SM3_256,
+                                    wrong_id, sizeof(wrong_id) - 1,
+                                    message, message_size, signature, sig_size);
+    if (status) {
+        return false;
+    }
+
+    libspdm_set_mem(short_der, sizeof(short_der), 0xA5);
+    libspdm_set_mem(expected_short_der, sizeof(expected_short_der), 0xA5);
+    short_der_size = sizeof(short_der);
+    status = libspdm_test_ecc_sig_bin_to_der(signature, sig_size,
+                                             short_der, &short_der_size);
+    if (status || short_der_size != sizeof(short_der) ||
+        memcmp(short_der, expected_short_der, sizeof(short_der)) != 0) {
+        return false;
+    }
+
+    return true;
+}
+#endif /* LIBSPDM_SM2_DSA_SUPPORT */
+
 /**
  * Validate Crypto sm2 Interfaces.
  *
@@ -179,6 +259,17 @@ bool libspdm_validate_crypt_sm2(void)
                                sizeof(DEFAULT_SM2_ID) - 1,
                                message,
                                sizeof(message), signature, sig_size);
+    if (!status) {
+        libspdm_my_print("[Fail]");
+        libspdm_sm2_dsa_free(Sm2_1);
+        return false;
+    } else {
+        libspdm_my_print("[Pass]\n");
+    }
+
+    libspdm_my_print("- SM2 Negative verification cases ... ");
+    status = libspdm_validate_crypt_sm2_negative_verify_cases(
+        Sm2_1, message, sizeof(message), signature, sig_size);
     if (!status) {
         libspdm_my_print("[Fail]");
         libspdm_sm2_dsa_free(Sm2_1);

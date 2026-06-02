@@ -391,8 +391,18 @@ void libspdm_set_connection_state(libspdm_context_t *spdm_context,
                                   libspdm_connection_state_t connection_state)
 {
     if (spdm_context->connection_info.connection_state != connection_state) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "libspdm_set_connection_state: %d -> %d callback=%p (before)\n",
+                       spdm_context->connection_info.connection_state,
+                       connection_state,
+                       spdm_context->spdm_connection_state_callback));
         spdm_context->connection_info.connection_state = connection_state;
         libspdm_trigger_connection_state_callback(spdm_context, connection_state);
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "libspdm_set_connection_state: %d -> %d callback=%p (after)\n",
+                       spdm_context->connection_info.connection_state,
+                       connection_state,
+                       spdm_context->spdm_connection_state_callback));
     }
 }
 
@@ -581,6 +591,9 @@ libspdm_return_t libspdm_build_response(void *spdm_context, const uint32_t *sess
     get_response_func = NULL;
     if (!is_app_message) {
         get_response_func = libspdm_get_response_func_via_last_request(context);
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "libspdm_build_response: dispatch request_code=0x%x get_response_func=%p is_app_message=%d\n",
+                       spdm_request->request_response_code, (void *)get_response_func, is_app_message));
 
         #if LIBSPDM_ENABLE_CAPABILITY_CHUNK_CAP
         /* If responder is expecting chunk_get or chunk_send requests
@@ -610,20 +623,34 @@ libspdm_return_t libspdm_build_response(void *spdm_context, const uint32_t *sess
         #endif /* LIBSPDM_ENABLE_CAPABILITY_CHUNK_CAP */
 
         if (get_response_func != NULL) {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "libspdm_build_response: calling get_response_func=%p request_code=0x%x request_size=0x%zx\n",
+                           (void *)get_response_func,
+                           spdm_request->request_response_code,
+                           context->last_spdm_request_size));
             status = get_response_func(
                 context,
                 context->last_spdm_request_size,
                 context->last_spdm_request,
                 &my_response_size, my_response);
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "libspdm_build_response: get_response_func returned status=0x%x my_response_size=0x%zx\n",
+                           status, my_response_size));
         }
     }
     if (is_app_message || (get_response_func == NULL)) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "libspdm_build_response: using context->get_response_func=%p (is_app_message=%d get_response_func=%p)\n",
+                       context->get_response_func, is_app_message, (void *)get_response_func));
         if (context->get_response_func != NULL) {
             status = ((libspdm_get_response_func) context->get_response_func)(
                 context, session_id, is_app_message,
                 context->last_spdm_request_size,
                 context->last_spdm_request,
                 &my_response_size, my_response);
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "libspdm_build_response: context->get_response_func returned status=0x%x my_response_size=0x%zx\n",
+                           status, my_response_size));
         } else {
             status = LIBSPDM_STATUS_UNSUPPORTED_CAP;
         }

@@ -280,6 +280,54 @@ bool libspdm_dhe_generate_key(uint16_t dhe_named_group, void *context,
     }
 }
 
+bool libspdm_dhe_set_static_priv(uint16_t dhe_named_group, void *context,
+                                 const uint8_t *priv, size_t priv_size)
+{
+    switch (dhe_named_group) {
+    case SPDM_ALGORITHMS_DHE_NAMED_GROUP_SM2_P256:
+#if LIBSPDM_SM2_KEY_EXCHANGE_SUPPORT && LIBSPDM_SM2_KEY_EXCHANGE_FULL_GBT_32918_3_SUPPORT
+        return libspdm_sm2_key_exchange_set_static_priv(context, priv, priv_size);
+#else
+        LIBSPDM_ASSERT(false);
+        return false;
+#endif
+    default:
+        return true;
+    }
+}
+
+bool libspdm_dhe_set_static_pub_self(uint16_t dhe_named_group, void *context,
+                                     const uint8_t *pub, size_t pub_size)
+{
+    switch (dhe_named_group) {
+    case SPDM_ALGORITHMS_DHE_NAMED_GROUP_SM2_P256:
+#if LIBSPDM_SM2_KEY_EXCHANGE_SUPPORT && LIBSPDM_SM2_KEY_EXCHANGE_FULL_GBT_32918_3_SUPPORT
+        return libspdm_sm2_key_exchange_set_static_pub_self(context, pub, pub_size);
+#else
+        LIBSPDM_ASSERT(false);
+        return false;
+#endif
+    default:
+        return true;
+    }
+}
+
+bool libspdm_dhe_set_static_pub_peer(uint16_t dhe_named_group, void *context,
+                                     const uint8_t *pub, size_t pub_size)
+{
+    switch (dhe_named_group) {
+    case SPDM_ALGORITHMS_DHE_NAMED_GROUP_SM2_P256:
+#if LIBSPDM_SM2_KEY_EXCHANGE_SUPPORT && LIBSPDM_SM2_KEY_EXCHANGE_FULL_GBT_32918_3_SUPPORT
+        return libspdm_sm2_key_exchange_set_static_pub_peer(context, pub, pub_size);
+#else
+        LIBSPDM_ASSERT(false);
+        return false;
+#endif
+    default:
+        return true;
+    }
+}
+
 bool libspdm_dhe_compute_key(uint16_t dhe_named_group, void *context,
                              const uint8_t *peer_public,
                              size_t peer_public_size, uint8_t *key,

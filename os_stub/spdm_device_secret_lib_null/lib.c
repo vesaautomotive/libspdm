@@ -113,6 +113,12 @@ bool libspdm_measurement_extension_log_collection(
 }
 #endif /* LIBSPDM_ENABLE_CAPABILITY_MEL_CAP */
 
+bool libspdm_requester_read_private_key_pem(uint16_t req_base_asym_alg,
+                                            void **data, size_t *size)
+{
+    return false;
+}
+
 #if LIBSPDM_ENABLE_CAPABILITY_MUT_AUTH_CAP
 bool libspdm_requester_data_sign(
 #if LIBSPDM_HAL_PASS_SPDM_CONTEXT
@@ -127,6 +133,12 @@ bool libspdm_requester_data_sign(
     return false;
 }
 #endif /* LIBSPDM_ENABLE_CAPABILITY_MUT_AUTH_CAP */
+
+bool libspdm_responder_read_private_key_pem(uint32_t base_asym_algo,
+                                            void **data, size_t *size)
+{
+    return false;
+}
 
 bool libspdm_responder_data_sign(
 #if LIBSPDM_HAL_PASS_SPDM_CONTEXT

@@ -35,6 +35,7 @@ target_sources(cryptlib_openssl
         pk/ecd.c
         pk/dh.c
         pk/sm2.c
+        pk/sm2_kex_adapter.c
         pk/rsa_basic.c
         pk/rsa_ext.c
         pk/x509.c

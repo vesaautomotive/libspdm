@@ -782,6 +782,30 @@ bool libspdm_dhe_compute_key(uint16_t dhe_named_group, void *context,
                              size_t *key_size);
 
 /**
+ * Inject local static private key material for SM2 DHE contexts.
+ *
+ * For non-SM2 groups this function is a no-op and returns true.
+ */
+bool libspdm_dhe_set_static_priv(uint16_t dhe_named_group, void *context,
+                                 const uint8_t *priv, size_t priv_size);
+
+/**
+ * Inject local static public key material for SM2 DHE contexts.
+ *
+ * For non-SM2 groups this function is a no-op and returns true.
+ */
+bool libspdm_dhe_set_static_pub_self(uint16_t dhe_named_group, void *context,
+                                     const uint8_t *pub, size_t pub_size);
+
+/**
+ * Inject peer static public key material for SM2 DHE contexts.
+ *
+ * For non-SM2 groups this function is a no-op and returns true.
+ */
+bool libspdm_dhe_set_static_pub_peer(uint16_t dhe_named_group, void *context,
+                                     const uint8_t *pub, size_t pub_size);
+
+/**
  * This function returns the SPDM AEAD algorithm key size.
  *
  * @param  aead_cipher_suite  SPDM aead_cipher_suite

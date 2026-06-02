@@ -36,12 +36,21 @@ libspdm_return_t libspdm_responder_dispatch_message(void *spdm_context)
     #endif /* LIBSPDM_ENABLE_CAPABILITY_CHUNK_CAP */
     status = context->receive_message(context, &request_size, (void **)&request, 0);
     if (LIBSPDM_STATUS_IS_ERROR(status)) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "libspdm_responder_dispatch_message: receive_message failed status=0x%x\n",
+                       status));
         libspdm_release_receiver_buffer (context);
         return status;
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "libspdm_responder_dispatch_message: about to process request request_size=0x%zx\n",
+                   request_size));
     status = libspdm_process_request(context, &session_id, &is_app_message,
                                      request_size, request);
     if (LIBSPDM_STATUS_IS_ERROR(status)) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "libspdm_responder_dispatch_message: libspdm_process_request failed status=0x%x request_size=0x%zx\n",
+                       status, request_size));
         libspdm_release_receiver_buffer (context);
         return status;
     }
@@ -65,14 +74,28 @@ libspdm_return_t libspdm_responder_dispatch_message(void *spdm_context)
     response_size = message_size;
     libspdm_zero_mem(response, response_size);
 
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "libspdm_responder_dispatch_message: about to build response is_app_message=%d session_id_ptr=%p response_buf_size=0x%zx\n",
+                   is_app_message, session_id_ptr, response_size));
     status = libspdm_build_response(context, session_id_ptr, is_app_message,
                                     &response_size, (void **)&response);
     if (LIBSPDM_STATUS_IS_ERROR(status)) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "libspdm_responder_dispatch_message: libspdm_build_response failed status=0x%x response_size=0x%zx\n",
+                       status, response_size));
         libspdm_release_sender_buffer (context);
         return status;
     }
 
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "libspdm_responder_dispatch_message: about to send response response_size=0x%zx session_id_ptr=%p\n",
+                   response_size, session_id_ptr));
     status = context->send_message(context, response_size, response, 0);
+    if (LIBSPDM_STATUS_IS_ERROR(status)) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "libspdm_responder_dispatch_message: send_message failed status=0x%x response_size=0x%zx\n",
+                       status, response_size));
+    }
 
     libspdm_release_sender_buffer (context);
 

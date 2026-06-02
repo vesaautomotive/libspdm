@@ -363,6 +363,9 @@ void libspdm_asym_free(uint32_t base_asym_algo, void *context)
     if (context == NULL) {
         return;
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "libspdm_asym_free: enter base_asym=0x%x context=%p\n",
+                   base_asym_algo, context));
     switch (base_asym_algo) {
     case SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_RSASSA_2048:
     case SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_RSASSA_3072:
@@ -395,7 +398,12 @@ void libspdm_asym_free(uint32_t base_asym_algo, void *context)
         break;
     case SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_SM2_ECC_SM2_P256:
 #if LIBSPDM_SM2_DSA_SUPPORT
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "libspdm_asym_free: calling libspdm_sm2_dsa_free context=%p\n",
+                       context));
         libspdm_sm2_dsa_free(context);
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "libspdm_asym_free: libspdm_sm2_dsa_free done\n"));
 #else
         LIBSPDM_ASSERT(false);
 #endif
@@ -404,6 +412,8 @@ void libspdm_asym_free(uint32_t base_asym_algo, void *context)
         LIBSPDM_ASSERT(false);
         break;
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "libspdm_asym_free: exit base_asym=0x%x\n", base_asym_algo));
 }
 
 static bool libspdm_asym_get_public_key_from_der_wrap(uint32_t base_asym_algo,

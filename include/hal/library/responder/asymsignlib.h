@@ -74,4 +74,20 @@ extern bool libspdm_responder_data_sign(
     const uint8_t *message, size_t message_size,
     uint8_t *signature, size_t *sig_size);
 
+/**
+ * Read responder private key material in PEM format.
+ *
+ * The returned buffer is heap-allocated by the secret library. Caller owns it and
+ * is responsible for clearing and freeing after use.
+ *
+ * @param[in]  base_asym_algo  Indicates the signing algorithm.
+ * @param[out] data            Pointer to allocated PEM buffer.
+ * @param[out] size            PEM buffer size in bytes.
+ *
+ * @retval true   Key data was returned.
+ * @retval false  Key data is unavailable.
+ */
+extern bool libspdm_responder_read_private_key_pem(uint32_t base_asym_algo,
+                                                   void **data, size_t *size);
+
 #endif /* RESPONDER_ASYMSIGNLIB_H */

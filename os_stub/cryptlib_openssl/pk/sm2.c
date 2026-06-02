@@ -21,6 +21,9 @@
 #include <openssl/core_names.h>
 #include <openssl/param_build.h>
 
+bool libspdm_test_ecc_sig_bin_to_der(const uint8_t *signature, size_t sig_size,
+                                     uint8_t *der, size_t *der_len_in_out);
+
 /* SM2 public key size: 32-byte X coordinate + 32-byte Y coordinate. */
 #define SM2_COORD_SIZE     32U
 #define SM2_PUB_KEY_SIZE   64U  /* SM2_COORD_SIZE * 2 */
@@ -36,8 +39,11 @@
  * =========================================================================*/
 
 typedef struct {
+    uint32_t magic;
     EVP_PKEY *pkey;
 } libspdm_sm2_ctx_t;
+
+#define LIBSPDM_SM2_CTX_MAGIC 0x534D3243u /* "SM2C" */
 
 /**
  * Returns the inner EVP_PKEY* from an opaque sm2_context pointer.
@@ -45,7 +51,16 @@ typedef struct {
  **/
 static EVP_PKEY *sm2_pkey(const void *ctx)
 {
-    return ctx ? ((const libspdm_sm2_ctx_t *)ctx)->pkey : NULL;
+    const libspdm_sm2_ctx_t *wrapper;
+    if (ctx == NULL) {
+        return NULL;
+    }
+    wrapper = (const libspdm_sm2_ctx_t *)ctx;
+    if (wrapper->magic == LIBSPDM_SM2_CTX_MAGIC) {
+        return wrapper->pkey;
+    }
+    /* Backward-compatibility path: some parsers still return raw EVP_PKEY*. */
+    return (EVP_PKEY *)ctx;
 }
 
 /**
@@ -58,6 +73,10 @@ static EVP_PKEY *sm2_pkey(const void *ctx)
  **/
 static bool sm2_pkey_is_sm2(const EVP_PKEY *pkey)
 {
+    const EC_KEY *ec_key;
+    const EC_GROUP *ec_group;
+    int curve_nid;
+
     if (pkey == NULL) {
         return false;
     }
@@ -68,6 +87,20 @@ static bool sm2_pkey_is_sm2(const EVP_PKEY *pkey)
 #endif
     if (EVP_PKEY_id(pkey) == EVP_PKEY_SM2) {
         return true;
+    }
+    if (EVP_PKEY_id(pkey) == EVP_PKEY_EC) {
+        ec_key = EVP_PKEY_get0_EC_KEY((EVP_PKEY *)pkey);
+        if (ec_key == NULL) {
+            return false;
+        }
+        ec_group = EC_KEY_get0_group(ec_key);
+        if (ec_group == NULL) {
+            return false;
+        }
+        curve_nid = EC_GROUP_get_curve_name(ec_group);
+        if (curve_nid == NID_sm2) {
+            return true;
+        }
     }
     return false;
 }
@@ -115,8 +148,15 @@ bool ecc_sig_der_to_bin(const uint8_t *der, size_t der_len,
  * Converts the raw R||S binary form (each component zero-padded to half_size)
  * to DER-encoded ECDSA/SM2 signature.
  *
- * Returns true on success, false on allocation failure or if the output
- * buffer is too small (*der_len_in_out is not modified on failure).
+ * Returns true on success, false on allocation failure, malformed input,
+ * or if the output buffer is too small.  On any failure path *der_len_in_out
+ * and the contents of *der are left unchanged.
+ *
+ * Implementation note: i2d_ECDSA_SIG(sig, &p) writes into *p as soon as p is
+ * non-NULL, so the size check MUST happen before the write.  We use the
+ * canonical OpenSSL two-call pattern: first i2d_ECDSA_SIG(sig, NULL) to query
+ * the required encoded length, then validate against the caller's buffer,
+ * then do the actual serialization.
  **/
 static bool ecc_sig_bin_to_der(const uint8_t *signature, size_t sig_size,
                                uint8_t *der, size_t *der_len_in_out)
@@ -125,34 +165,65 @@ static bool ecc_sig_bin_to_der(const uint8_t *signature, size_t sig_size,
     BIGNUM *bn_r = NULL;
     BIGNUM *bn_s = NULL;
     ECDSA_SIG *ecdsa_sig = NULL;
-    bool ret_val = false;
     uint8_t *der_out = NULL;
+    int required_len = 0;
     int encoded_len = 0;
+    bool ret_val = false;
+
+    if (signature == NULL || der == NULL || der_len_in_out == NULL ||
+        sig_size == 0U || (sig_size & 1U) != 0U) {
+        return false;
+    }
 
     half_size = sig_size / 2;
     bn_r = BN_bin2bn(signature, (int)half_size, NULL);
     bn_s = BN_bin2bn(signature + half_size, (int)half_size, NULL);
     ecdsa_sig = ECDSA_SIG_new();
-    if ((bn_r != NULL) && (bn_s != NULL) && (ecdsa_sig != NULL) &&
-        (ECDSA_SIG_set0(ecdsa_sig, bn_r, bn_s) == 1)) {
-        ret_val = true;
+    if (bn_r == NULL || bn_s == NULL || ecdsa_sig == NULL) {
+        goto done;
     }
-    if (ret_val) {
-        der_out = der;
-        encoded_len = i2d_ECDSA_SIG(ecdsa_sig, &der_out);
-        if ((encoded_len > 0) && ((size_t)encoded_len <= *der_len_in_out)) {
-            ret_val = true;
-            *der_len_in_out = (size_t)encoded_len;
-        } else {
-            ret_val = false;
-        }
-    } else {
-        /* ECDSA_SIG_set0 transfers ownership only on success; free manually. */
-        BN_free(bn_r);
-        BN_free(bn_s);
+
+    if (ECDSA_SIG_set0(ecdsa_sig, bn_r, bn_s) != 1) {
+        goto done;
     }
+    /* set0 took ownership on success; null out so cleanup doesn't double-free. */
+    bn_r = NULL;
+    bn_s = NULL;
+
+    /* Size query first — passing NULL means "return required length, no write". */
+    required_len = i2d_ECDSA_SIG(ecdsa_sig, NULL);
+    if (required_len <= 0 || (size_t)required_len > *der_len_in_out) {
+        goto done;
+    }
+
+    der_out = der;
+    encoded_len = i2d_ECDSA_SIG(ecdsa_sig, &der_out);
+    if (encoded_len != required_len) {
+        goto done;
+    }
+
+    *der_len_in_out = (size_t)encoded_len;
+    ret_val = true;
+
+done:
+    /* BN_free / ECDSA_SIG_free are NULL-safe. */
+    BN_free(bn_r);
+    BN_free(bn_s);
     ECDSA_SIG_free(ecdsa_sig);
     return ret_val;
+}
+
+/**
+ * Unit-test helper: exposes raw-RS to DER conversion validation for negative tests.
+ *
+ * This function intentionally forwards to the internal helper so tests can verify
+ * fail-closed behavior (especially undersized output buffers) without duplicating
+ * DER conversion logic in test code.
+ **/
+bool libspdm_test_ecc_sig_bin_to_der(const uint8_t *signature, size_t sig_size,
+                                     uint8_t *der, size_t *der_len_in_out)
+{
+    return ecc_sig_bin_to_der(signature, sig_size, der, der_len_in_out);
 }
 
 /* =========================================================================
@@ -200,6 +271,7 @@ void *libspdm_sm2_dsa_new_by_nid(size_t nid)
         EVP_PKEY_free(pkey);
         return NULL;
     }
+    ctx->magic = LIBSPDM_SM2_CTX_MAGIC;
     ctx->pkey = pkey;
     return (void *)ctx;
 }
@@ -213,12 +285,35 @@ void *libspdm_sm2_dsa_new_by_nid(size_t nid)
 void libspdm_sm2_dsa_free(void *sm2_context)
 {
     libspdm_sm2_ctx_t *ctx = (libspdm_sm2_ctx_t *)sm2_context;
+    EVP_PKEY *pkey;
 
     if (ctx == NULL) {
         return;
     }
-    EVP_PKEY_free(ctx->pkey);
+    if (ctx->magic != LIBSPDM_SM2_CTX_MAGIC) {
+        /* Backward-compatibility path for raw EVP_PKEY* contexts. */
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "libspdm_sm2_dsa_free: legacy raw EVP_PKEY context=%p\n",
+                       sm2_context));
+        EVP_PKEY_free((EVP_PKEY *)sm2_context);
+        return;
+    }
+    pkey = ctx->pkey;
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "libspdm_sm2_dsa_free: enter ctx=%p pkey=%p\n",
+                   ctx, pkey));
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "libspdm_sm2_dsa_free: calling EVP_PKEY_free pkey=%p\n",
+                   pkey));
+    EVP_PKEY_free(pkey);
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "libspdm_sm2_dsa_free: EVP_PKEY_free done\n"));
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "libspdm_sm2_dsa_free: calling free_pool ctx=%p\n",
+                   ctx));
     free_pool(ctx);
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "libspdm_sm2_dsa_free: free_pool done\n"));
 }
 
 /**
@@ -336,6 +431,13 @@ bool libspdm_sm2_dsa_get_pub_key(void *sm2_context, uint8_t *public_key,
     EVP_PKEY *pkey = NULL;
     uint8_t pub_uncompressed[1 + SM2_PUB_KEY_SIZE];
     size_t out_len = 0;
+    EC_KEY *ec_key = NULL;
+    const EC_GROUP *ec_group = NULL;
+    const EC_POINT *ec_pub = NULL;
+    BN_CTX *bn_ctx = NULL;
+    EC_POINT *tmp_pub = NULL;
+    const BIGNUM *ec_priv = NULL;
+    size_t ec_oct_len = 0;
 
     if (sm2_context == NULL || public_key_size == NULL) {
         return false;
@@ -364,12 +466,88 @@ bool libspdm_sm2_dsa_get_pub_key(void *sm2_context, uint8_t *public_key,
                                         sizeof(pub_uncompressed),
                                         &out_len) <= 0 ||
         out_len != sizeof(pub_uncompressed) || pub_uncompressed[0] != 0x04) {
-        return false;
+        /* Some OpenSSL EC/SM2 private-key contexts may not expose PUB_KEY via OSSL_PARAM.
+         * Fall back to extracting/deriving the EC public point directly. */
+        ec_key = EVP_PKEY_get1_EC_KEY(pkey);
+        if (ec_key == NULL) {
+            return false;
+        }
+        ec_group = EC_KEY_get0_group(ec_key);
+        ec_pub = EC_KEY_get0_public_key(ec_key);
+        if (ec_group == NULL) {
+            EC_KEY_free(ec_key);
+            return false;
+        }
+        if (ec_pub == NULL) {
+            ec_priv = EC_KEY_get0_private_key(ec_key);
+            if (ec_priv == NULL) {
+                EC_KEY_free(ec_key);
+                return false;
+            }
+            tmp_pub = EC_POINT_new(ec_group);
+            bn_ctx = BN_CTX_new();
+            if (tmp_pub == NULL || bn_ctx == NULL ||
+                EC_POINT_mul(ec_group, tmp_pub, ec_priv, NULL, NULL, bn_ctx) != 1) {
+                EC_POINT_free(tmp_pub);
+                BN_CTX_free(bn_ctx);
+                EC_KEY_free(ec_key);
+                return false;
+            }
+            ec_pub = tmp_pub;
+        }
+
+        ec_oct_len = EC_POINT_point2oct(ec_group, ec_pub,
+                                        POINT_CONVERSION_UNCOMPRESSED,
+                                        pub_uncompressed, sizeof(pub_uncompressed), bn_ctx);
+        EC_POINT_free(tmp_pub);
+        BN_CTX_free(bn_ctx);
+        EC_KEY_free(ec_key);
+        if (ec_oct_len != sizeof(pub_uncompressed) || pub_uncompressed[0] != 0x04) {
+            return false;
+        }
     }
 
     libspdm_copy_mem(public_key, *public_key_size,
                      pub_uncompressed + 1, SM2_PUB_KEY_SIZE);
     return true;
+}
+
+bool libspdm_sm2_dsa_get_priv_key(void *sm2_context, uint8_t *private_key,
+                                  size_t *private_key_size)
+{
+    EVP_PKEY *pkey;
+    BIGNUM *priv_bn;
+    bool ret_val;
+
+    if (sm2_context == NULL || private_key_size == NULL) {
+        return false;
+    }
+    if (private_key == NULL && *private_key_size != 0) {
+        return false;
+    }
+    if (*private_key_size < SM2_COORD_SIZE) {
+        *private_key_size = SM2_COORD_SIZE;
+        return false;
+    }
+    *private_key_size = SM2_COORD_SIZE;
+
+    pkey = sm2_pkey(sm2_context);
+    if (!sm2_pkey_is_sm2(pkey)) {
+        return false;
+    }
+    if (private_key == NULL) {
+        return true;
+    }
+
+    priv_bn = NULL;
+    if (EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_PRIV_KEY, &priv_bn) <= 0 ||
+        priv_bn == NULL) {
+        BN_clear_free(priv_bn);
+        return false;
+    }
+    ret_val = (BN_bn2binpad(priv_bn, private_key, SM2_COORD_SIZE) == SM2_COORD_SIZE);
+    BN_clear_free(priv_bn);
+    return ret_val;
 }
 
 /**
@@ -499,18 +677,15 @@ bool libspdm_sm2_dsa_generate_key(void *sm2_context, uint8_t *public_data,
 }
 
 /* =========================================================================
- * SM2 key-exchange stubs
+ * SM2 key-exchange fallback path
  *
- * OpenSSL 3.x does not implement GB/T 32918.3 SM2 key exchange.  Only ECDH
- * on the SM2 curve is available.  A full SM2-KE implementation would require
- * hand-rolling the GB/T 32918.3 KDF on top of EC_GROUP/EC_POINT/BN
- * primitives (~300 lines + KATs from GB/T 32918.5).
+ * Full GB/T 32918.3 support lives in sm2_kex_adapter.c and is compiled when
+ * LIBSPDM_SM2_KEY_EXCHANGE_FULL_GBT_32918_3_SUPPORT is enabled.
  *
- * Audit result (Phase 4): test_profile_c_kat.cpp:Sm2KeyExchange_EphemeralRoundTrip
- * is gated on LIBSPDM_SM2_KEY_EXCHANGE_SUPPORT which is 0 in the current build.
- * No active SPDM Profile C path exercises these functions.  If that changes,
- * file a separate implementation ticket rather than bundling with this cleanup.
+ * The functions below are retained only as the explicit fallback behavior when
+ * that flag is disabled at build time; they intentionally return false.
  * =========================================================================*/
+#if !LIBSPDM_SM2_KEY_EXCHANGE_FULL_GBT_32918_3_SUPPORT
 
 /**
  * Allocates and Initializes one Shang-Mi2 context for subsequent use.
@@ -524,7 +699,7 @@ bool libspdm_sm2_dsa_generate_key(void *sm2_context, uint8_t *public_data,
 void *libspdm_sm2_key_exchange_new_by_nid(size_t nid)
 {
     (void)nid;
-    /* current openssl only supports ECDH with SM2 curve, but does not support SM2-key-exchange.*/
+    /* Build-time fallback when full GB/T 32918.3 support is disabled. */
     return NULL;
 }
 
@@ -537,7 +712,7 @@ void *libspdm_sm2_key_exchange_new_by_nid(size_t nid)
 void libspdm_sm2_key_exchange_free(void *sm2_context)
 {
     (void)sm2_context;
-    /* current openssl only supports ECDH with SM2 curve, but does not support SM2-key-exchange.*/
+    /* Build-time fallback when full GB/T 32918.3 support is disabled. */
 }
 
 /**
@@ -554,7 +729,7 @@ void libspdm_sm2_key_exchange_free(void *sm2_context)
  * @retval true   sm2 context is initialized.
  * @retval false  sm2 context is not initialized.
  **/
-bool libspdm_sm2_key_exchange_init(const void *sm2_context, size_t hash_nid,
+bool libspdm_sm2_key_exchange_init(void *sm2_context, size_t hash_nid,
                                    const uint8_t *id_a, size_t id_a_size,
                                    const uint8_t *id_b, size_t id_b_size,
                                    bool is_initiator)
@@ -566,7 +741,7 @@ bool libspdm_sm2_key_exchange_init(const void *sm2_context, size_t hash_nid,
     (void)id_b;
     (void)id_b_size;
     (void)is_initiator;
-    /* current openssl only supports ECDH with SM2 curve, but does not support SM2-key-exchange.*/
+    /* Build-time fallback when full GB/T 32918.3 support is disabled. */
     return false;
 }
 
@@ -589,7 +764,7 @@ bool libspdm_sm2_key_exchange_generate_key(void *sm2_context, uint8_t *public_da
     (void)sm2_context;
     (void)public_data;
     (void)public_size;
-    /* current openssl only supports ECDH with SM2 curve, but does not support SM2-key-exchange.*/
+    /* Build-time fallback when full GB/T 32918.3 support is disabled. */
     return false;
 }
 
@@ -616,9 +791,10 @@ bool libspdm_sm2_key_exchange_compute_key(void *sm2_context,
     (void)peer_public_size;
     (void)key;
     (void)key_size;
-    /* current openssl only supports ECDH with SM2 curve, but does not support SM2-key-exchange.*/
+    /* Build-time fallback when full GB/T 32918.3 support is disabled. */
     return false;
 }
+#endif /* !LIBSPDM_SM2_KEY_EXCHANGE_FULL_GBT_32918_3_SUPPORT */
 
 /* =========================================================================
  * SM2-DSA sign / verify

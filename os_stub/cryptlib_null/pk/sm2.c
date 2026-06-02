@@ -75,6 +75,12 @@ bool libspdm_sm2_dsa_get_pub_key(void *sm2_context, uint8_t *public_key,
     return false;
 }
 
+bool libspdm_sm2_dsa_get_priv_key(void *sm2_context, uint8_t *private_key,
+                                  size_t *private_key_size)
+{
+    return false;
+}
+
 /**
  * Validates key components of sm2 context.
  * NOTE: This function performs integrity checks on all the sm2 key material, so
@@ -168,7 +174,7 @@ void libspdm_sm2_key_exchange_free(void *sm2_context)
  * @retval true   sm2 context is initialized.
  * @retval false  sm2 context is not initialized.
  **/
-bool libspdm_sm2_key_exchange_init(const void *sm2_context, size_t hash_nid,
+bool libspdm_sm2_key_exchange_init(void *sm2_context, size_t hash_nid,
                                    const uint8_t *id_a, size_t id_a_size,
                                    const uint8_t *id_b, size_t id_b_size,
                                    bool is_initiator)
@@ -243,6 +249,26 @@ bool libspdm_sm2_key_exchange_compute_key(void *sm2_context,
 {
     return false;
 }
+
+#if LIBSPDM_SM2_KEY_EXCHANGE_FULL_GBT_32918_3_SUPPORT
+bool libspdm_sm2_key_exchange_set_static_priv(
+    void *sm2_context, const uint8_t *priv_d, size_t priv_d_size)
+{
+    return false;
+}
+
+bool libspdm_sm2_key_exchange_set_static_pub_self(
+    void *sm2_context, const uint8_t *pub_xy, size_t pub_xy_size)
+{
+    return false;
+}
+
+bool libspdm_sm2_key_exchange_set_static_pub_peer(
+    void *sm2_context, const uint8_t *pub_xy, size_t pub_xy_size)
+{
+    return false;
+}
+#endif
 
 /**
  * Carries out the SM2 signature, based upon GB/T 32918.2-2016: SM2 - Part2.

@@ -757,24 +757,39 @@ static bool libspdm_verify_leaf_cert_basic_constraints(const uint8_t *cert, size
     uint8_t basic_constraints_false_case2[] = BASIC_CONSTRAINTS_STRING_FALSE_CASE2;
 
     len = LIBSPDM_MAX_BASIC_CONSTRAINTS_CA_LEN;
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_leaf_basic_constraints: enter cert_size=0x%zx need_basic=%d\n",
+                   cert_size, need_basic_constraints));
 
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_leaf_basic_constraints: calling x509_get_extended_basic_constraints\n"));
     status = libspdm_x509_get_extended_basic_constraints(cert, cert_size,
                                                          cert_basic_constraints, &len);
     if (!status) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "verify_leaf_basic_constraints: x509_get_extended_basic_constraints failed\n"));
         return false;
     } else if (len == 0) {
         /* basic constraints is not present in cert */
         if (need_basic_constraints) {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "verify_leaf_basic_constraints: basic constraints missing but required\n"));
             return false;
         } else {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "verify_leaf_basic_constraints: basic constraints missing and allowed\n"));
             return true;
         }
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_leaf_basic_constraints: parsed len=0x%zx\n", len));
 
     if ((len == sizeof(basic_constraints_false_case1)) &&
         (libspdm_consttime_is_mem_equal(cert_basic_constraints,
                                         basic_constraints_false_case1,
                                         sizeof(basic_constraints_false_case1)))) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "verify_leaf_basic_constraints: matched false case1\n"));
         return true;
     }
 
@@ -782,9 +797,13 @@ static bool libspdm_verify_leaf_cert_basic_constraints(const uint8_t *cert, size
         (libspdm_consttime_is_mem_equal(cert_basic_constraints,
                                         basic_constraints_false_case2,
                                         sizeof(basic_constraints_false_case2)))) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "verify_leaf_basic_constraints: matched false case2\n"));
         return true;
     }
 
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_leaf_basic_constraints: no acceptable match\n"));
     return false;
 }
 
@@ -1089,9 +1108,14 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
     context = NULL;
     end_cert_from_len = 64;
     end_cert_to_len = 64;
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "x509_common_check: enter cert_size=0x%zx base_asym=0x%x base_hash=0x%x requester=%d cert_model=%u set_cert=%d\n",
+                   cert_size, base_asym_algo, base_hash_algo, is_requester_cert,
+                   cert_model, set_cert));
 
     /* 1. version*/
     cert_version = 0;
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: step1 get_version\n"));
     status = libspdm_x509_get_version(cert, cert_size, &cert_version);
     if (!status) {
         goto cleanup;
@@ -1103,6 +1127,7 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
 
     /* 2. serial_number*/
     asn1_buffer_len = 0;
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: step2 get_serial_number\n"));
     status = libspdm_x509_get_serial_number(cert, cert_size, NULL, &asn1_buffer_len);
     if (asn1_buffer_len == 0) {
         status = false;
@@ -1132,6 +1157,8 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
      *    check should be skipped as the Device Certificate CA's public key does not have to use
      *    the same algorithms as the connection's negotiated algorithms. */
     if (!set_cert || (cert_model != SPDM_CERTIFICATE_INFO_CERT_MODEL_ALIAS_CERT)) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "x509_common_check: step4 verify_cert_subject_public_key_info\n"));
         status = libspdm_verify_cert_subject_public_key_info(cert, cert_size, base_asym_algo);
         if (!status) {
             goto cleanup;
@@ -1140,6 +1167,7 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
 
     /* 5. issuer_name*/
     asn1_buffer_len = 0;
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: step5 get_issuer_name\n"));
     status = libspdm_x509_get_issuer_name(cert, cert_size, NULL, &asn1_buffer_len);
     if (status) {
         if ((asn1_buffer_len == 0) &&
@@ -1156,6 +1184,7 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
 
     /* 6. subject_name*/
     asn1_buffer_len = 0;
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: step6 get_subject_name\n"));
     status = libspdm_x509_get_subject_name(cert, cert_size, NULL, &asn1_buffer_len);
     if (status) {
         if ((asn1_buffer_len == 0) &&
@@ -1171,6 +1200,7 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
     }
 
     /* 7. validity*/
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: step7 get_validity\n"));
     status = libspdm_x509_get_validity(cert, cert_size, end_cert_from,
                                        &end_cert_from_len, end_cert_to,
                                        &end_cert_to_len);
@@ -1188,6 +1218,7 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
     }
 
     if (end_cert_from_len != 0) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: step7b date_time_check\n"));
         status = libspdm_internal_x509_date_time_check(
             end_cert_from, end_cert_from_len, end_cert_to, end_cert_to_len);
         if (!status) {
@@ -1196,6 +1227,7 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
     }
 
     /* 8. subject_public_key*/
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: step8 asym_get_public_key_from_x509\n"));
     status = libspdm_asym_get_public_key_from_x509(base_asym_algo, cert, cert_size, &context);
     if (!status) {
         goto cleanup;
@@ -1208,6 +1240,7 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
     if (!set_cert || (cert_model != SPDM_CERTIFICATE_INFO_CERT_MODEL_ALIAS_CERT)) {
         size_t value = 0;
 
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: step9 get_key_usage\n"));
         status = libspdm_x509_get_key_usage(cert, cert_size, &value);
         if (!status) {
             goto cleanup;
@@ -1227,6 +1260,7 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
     }
 
     /* 10. verify spdm defined extended key usage*/
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: step10 verify_leaf_cert_spdm_eku\n"));
     status = libspdm_verify_leaf_cert_spdm_eku(cert, cert_size, is_requester_cert);
     if (!status) {
         goto cleanup;
@@ -1234,6 +1268,7 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
 
     if ((!set_cert) || (cert_model == SPDM_CERTIFICATE_INFO_CERT_MODEL_DEVICE_CERT)) {
         /* 11. verify spdm defined extension*/
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: step11 verify_leaf_cert_spdm_extension\n"));
         status = libspdm_verify_leaf_cert_spdm_extension(cert, cert_size,
                                                          is_requester_cert, cert_model);
         if (!status) {
@@ -1242,7 +1277,10 @@ bool libspdm_x509_common_certificate_check(const uint8_t *cert, size_t cert_size
     }
 
 cleanup:
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: cleanup before asym_free status=%d context=%p\n",
+                   status, context));
     libspdm_asym_free(base_asym_algo, context);
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_common_check: cleanup after asym_free status=%d\n", status));
     return status;
 }
 
@@ -1274,16 +1312,26 @@ bool libspdm_x509_certificate_check(const uint8_t *cert, size_t cert_size,
     } else {
         cert_model = SPDM_CERTIFICATE_INFO_CERT_MODEL_ALIAS_CERT;
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "x509_certificate_check: enter cert_size=0x%zx base_asym=0x%x base_hash=0x%x requester=%d device_model=%d cert_model=%u\n",
+                   cert_size, base_asym_algo, base_hash_algo,
+                   is_requester, is_device_cert_model, cert_model));
 
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_certificate_check: calling x509_common_certificate_check\n"));
     status = libspdm_x509_common_certificate_check(cert, cert_size, base_asym_algo,
                                                    base_hash_algo, is_requester,
                                                    cert_model, false);
     if (!status) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_certificate_check: common check failed\n"));
         return false;
     }
 
     /* verify basic constraints: the leaf cert always is ca:false in get_cert*/
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_certificate_check: calling verify_leaf_cert_basic_constraints\n"));
     status = libspdm_verify_leaf_cert_basic_constraints(cert, cert_size, false);
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_certificate_check: verify_leaf_cert_basic_constraints returned %d\n",
+                   status));
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO, "x509_certificate_check: exit status=%d\n", status));
     return status;
 }
 
@@ -1678,7 +1726,13 @@ bool libspdm_verify_cert_chain_data(uint8_t *cert_chain_data, size_t cert_chain_
                        "!!! VerifyCertificateChainData - FAIL (chain size too large) !!!\n"));
         return false;
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_cert_chain_data: enter chain_size=0x%zx base_asym=0x%x base_hash=0x%x requester=%d device_model=%d\n",
+                   cert_chain_data_size, base_asym_algo, base_hash_algo,
+                   is_requester_cert, is_device_cert_model));
 
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_cert_chain_data: calling x509_get_cert_from_cert_chain(root)\n"));
     if (!libspdm_x509_get_cert_from_cert_chain(
             cert_chain_data, cert_chain_data_size, 0, &root_cert_buffer,
             &root_cert_buffer_size)) {
@@ -1686,14 +1740,24 @@ bool libspdm_verify_cert_chain_data(uint8_t *cert_chain_data, size_t cert_chain_
                        "!!! VerifyCertificateChainData - FAIL (get root certificate failed)!!!\n"));
         return false;
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_cert_chain_data: x509_get_cert_from_cert_chain(root) done root_size=0x%zx\n",
+                   root_cert_buffer_size));
 
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_cert_chain_data: calling x509_verify_cert_chain root_size=0x%zx chain_size=0x%zx\n",
+                   root_cert_buffer_size, cert_chain_data_size));
     if (!libspdm_x509_verify_cert_chain(root_cert_buffer, root_cert_buffer_size,
                                         cert_chain_data, cert_chain_data_size)) {
         LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
                        "!!! VerifyCertificateChainData - FAIL (cert chain verify failed)!!!\n"));
         return false;
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_cert_chain_data: x509_verify_cert_chain done\n"));
 
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_cert_chain_data: calling x509_get_cert_from_cert_chain(leaf)\n"));
     if (!libspdm_x509_get_cert_from_cert_chain(
             cert_chain_data, cert_chain_data_size, -1,
             &leaf_cert_buffer, &leaf_cert_buffer_size)) {
@@ -1701,7 +1765,13 @@ bool libspdm_verify_cert_chain_data(uint8_t *cert_chain_data, size_t cert_chain_
                        "!!! VerifyCertificateChainData - FAIL (get leaf certificate failed)!!!\n"));
         return false;
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_cert_chain_data: x509_get_cert_from_cert_chain(leaf) done leaf_size=0x%zx\n",
+                   leaf_cert_buffer_size));
 
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_cert_chain_data: calling x509_certificate_check leaf_size=0x%zx\n",
+                   leaf_cert_buffer_size));
     if (!libspdm_x509_certificate_check(leaf_cert_buffer, leaf_cert_buffer_size,
                                         base_asym_algo, base_hash_algo,
                                         is_requester_cert, is_device_cert_model)) {
@@ -1709,6 +1779,8 @@ bool libspdm_verify_cert_chain_data(uint8_t *cert_chain_data, size_t cert_chain_
                        "!!! VerifyCertificateChainData - FAIL (leaf certificate check failed)!!!\n"));
         return false;
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "verify_cert_chain_data: x509_certificate_check done\n"));
 
     return true;
 }

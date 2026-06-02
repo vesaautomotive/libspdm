@@ -265,6 +265,11 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
     spdm_request = request;
 
     ext_alg_total_count = 0;
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "rsp_algorithms: enter request_size=0x%zx version=0x%x param1=%u length=0x%x ext_asym=%u ext_hash=%u\n",
+                   request_size, spdm_request->header.spdm_version,
+                   spdm_request->header.param1, spdm_request->length,
+                   spdm_request->ext_asym_count, spdm_request->ext_hash_count));
 
     /* -=[Check Parameters Phase]=- */
     LIBSPDM_ASSERT(spdm_request->header.request_response_code == SPDM_NEGOTIATE_ALGORITHMS);
@@ -348,6 +353,11 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
             fixed_alg_size = (struct_table->alg_count >> 4) & 0xF;
             ext_alg_count = struct_table->alg_count & 0xF;
             ext_alg_total_count += ext_alg_count;
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "rsp_algorithms: request struct_table[%u] alg_type=0x%x alg_count=0x%x alg_supported=0x%x ext_alg_count=%u\n",
+                           (uint32_t)index, struct_table->alg_type,
+                           struct_table->alg_count, struct_table->alg_supported,
+                           ext_alg_count));
             if (fixed_alg_size != 2) {
                 return libspdm_generate_error_response(
                     spdm_context,
@@ -400,6 +410,9 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
 
     request_size = (size_t)struct_table - (size_t)spdm_request;
     if (request_size != spdm_request->length) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                       "rsp_algorithms invalid request: parsed_size(0x%zx) != header_length(0x%x)\n",
+                       request_size, spdm_request->length));
         return libspdm_generate_error_response(
             spdm_context,
             SPDM_ERROR_CODE_INVALID_REQUEST, 0,
@@ -539,6 +552,14 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
                          sizeof(uint32_t) * ext_alg_count);
         }
     }
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "rsp_algorithms: selected prelim algs base_hash=0x%x base_asym=0x%x dhe=0x%x aead=0x%x req_asym=0x%x key_schedule=0x%x\n",
+                   spdm_context->connection_info.algorithm.base_hash_algo,
+                   spdm_context->connection_info.algorithm.base_asym_algo,
+                   spdm_context->connection_info.algorithm.dhe_named_group,
+                   spdm_context->connection_info.algorithm.aead_cipher_suite,
+                   spdm_context->connection_info.algorithm.req_base_asym_alg,
+                   spdm_context->connection_info.algorithm.key_schedule));
     if (spdm_request->header.spdm_version >= SPDM_MESSAGE_VERSION_12) {
         spdm_context->connection_info.algorithm.other_params_support =
             spdm_request->other_params_support & SPDM_ALGORITHMS_OPAQUE_DATA_FORMAT_MASK;
@@ -648,8 +669,14 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
                 spdm_context, SPDM_ERROR_CODE_INVALID_REQUEST,
                 0, response_size, response);
         }
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "rsp_algorithms: calling libspdm_get_measurement_hash_size algo=0x%x\n",
+                       spdm_context->connection_info.algorithm.measurement_hash_algo));
         algo_size = libspdm_get_measurement_hash_size(
             spdm_context->connection_info.algorithm.measurement_hash_algo);
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "rsp_algorithms: libspdm_get_measurement_hash_size returned 0x%x\n",
+                       algo_size));
         if (algo_size == 0) {
             return libspdm_generate_error_response(
                 spdm_context, SPDM_ERROR_CODE_INVALID_REQUEST,
@@ -674,8 +701,14 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
             spdm_context, false,
             SPDM_GET_CAPABILITIES_REQUEST_FLAGS_PSK_CAP,
             SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_PSK_CAP)) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "rsp_algorithms: calling libspdm_get_hash_size algo=0x%x\n",
+                       spdm_context->connection_info.algorithm.base_hash_algo));
         algo_size = libspdm_get_hash_size(
             spdm_context->connection_info.algorithm.base_hash_algo);
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "rsp_algorithms: libspdm_get_hash_size returned 0x%x\n",
+                       algo_size));
         if (algo_size == 0) {
             return libspdm_generate_error_response(
                 spdm_context,
@@ -697,8 +730,14 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
             spdm_context, false,
             SPDM_GET_CAPABILITIES_REQUEST_FLAGS_KEY_EX_CAP,
             SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_KEY_EX_CAP)) {
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "rsp_algorithms: calling libspdm_get_asym_signature_size algo=0x%x\n",
+                       spdm_context->connection_info.algorithm.base_asym_algo));
         algo_size = libspdm_get_asym_signature_size(
             spdm_context->connection_info.algorithm.base_asym_algo);
+        LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                       "rsp_algorithms: libspdm_get_asym_signature_size returned 0x%x\n",
+                       algo_size));
         if (algo_size == 0) {
             return libspdm_generate_error_response(
                 spdm_context, SPDM_ERROR_CODE_INVALID_REQUEST,
@@ -755,9 +794,18 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
                 spdm_context, false,
                 SPDM_GET_CAPABILITIES_REQUEST_FLAGS_KEY_EX_CAP,
                 SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_KEY_EX_CAP)) {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "rsp_algorithms: calling libspdm_get_dhe_pub_key_size group=0x%x\n",
+                           spdm_context->connection_info.algorithm.dhe_named_group));
             algo_size = libspdm_get_dhe_pub_key_size(
                 spdm_context->connection_info.algorithm.dhe_named_group);
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "rsp_algorithms: libspdm_get_dhe_pub_key_size returned 0x%x\n",
+                           algo_size));
             if (algo_size == 0) {
+                LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                               "rsp_algorithms invalid request: selected DHE group has zero pubkey size (group=0x%x)\n",
+                               spdm_context->connection_info.algorithm.dhe_named_group));
                 return libspdm_generate_error_response(
                     spdm_context,
                     SPDM_ERROR_CODE_INVALID_REQUEST, 0,
@@ -772,9 +820,18 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
                 spdm_context, false,
                 SPDM_GET_CAPABILITIES_REQUEST_FLAGS_MAC_CAP,
                 SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_MAC_CAP)) {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "rsp_algorithms: calling libspdm_get_aead_key_size suite=0x%x\n",
+                           spdm_context->connection_info.algorithm.aead_cipher_suite));
             algo_size = libspdm_get_aead_key_size(
                 spdm_context->connection_info.algorithm.aead_cipher_suite);
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "rsp_algorithms: libspdm_get_aead_key_size returned 0x%x\n",
+                           algo_size));
             if (algo_size == 0) {
+                LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                               "rsp_algorithms invalid request: selected AEAD suite has zero key size (suite=0x%x)\n",
+                               spdm_context->connection_info.algorithm.aead_cipher_suite));
                 return libspdm_generate_error_response(
                     spdm_context,
                     SPDM_ERROR_CODE_INVALID_REQUEST, 0,
@@ -785,9 +842,18 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
                 spdm_context, false,
                 SPDM_GET_CAPABILITIES_REQUEST_FLAGS_MUT_AUTH_CAP,
                 SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_MUT_AUTH_CAP)) {
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "rsp_algorithms: calling libspdm_get_req_asym_signature_size algo=0x%x\n",
+                           spdm_context->connection_info.algorithm.req_base_asym_alg));
             algo_size = libspdm_get_req_asym_signature_size(
                 spdm_context->connection_info.algorithm.req_base_asym_alg);
+            LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                           "rsp_algorithms: libspdm_get_req_asym_signature_size returned 0x%x\n",
+                           algo_size));
             if (algo_size == 0) {
+                LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                               "rsp_algorithms invalid request: selected req_asym has zero signature size (algo=0x%x)\n",
+                               spdm_context->connection_info.algorithm.req_base_asym_alg));
                 return libspdm_generate_error_response(
                     spdm_context,
                     SPDM_ERROR_CODE_INVALID_REQUEST, 0,
@@ -804,6 +870,10 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
                 SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_PSK_CAP)) {
             if (spdm_context->connection_info.algorithm.key_schedule !=
                 SPDM_ALGORITHMS_KEY_SCHEDULE_SPDM) {
+                LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                               "rsp_algorithms invalid request: key_schedule mismatch (selected=0x%x expected=0x%x)\n",
+                               spdm_context->connection_info.algorithm.key_schedule,
+                               SPDM_ALGORITHMS_KEY_SCHEDULE_SPDM));
                 return libspdm_generate_error_response(
                     spdm_context,
                     SPDM_ERROR_CODE_INVALID_REQUEST, 0,
@@ -817,6 +887,8 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
                 if ((spdm_context->local_context.capability.flags &
                      SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_MULTI_KEY_CAP) ==
                     SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_MULTI_KEY_CAP_ONLY) {
+                    LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                                   "rsp_algorithms invalid request: requester did not select MULTI_KEY_CONN but responder is MULTI_KEY_CAP_ONLY\n"));
                     return libspdm_generate_error_response(
                         spdm_context,
                         SPDM_ERROR_CODE_INVALID_REQUEST, 0,
@@ -826,6 +898,8 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
             } else {
                 if ((spdm_context->local_context.capability.flags &
                      SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_MULTI_KEY_CAP) == 0) {
+                    LIBSPDM_DEBUG((LIBSPDM_DEBUG_ERROR,
+                                   "rsp_algorithms invalid request: requester selected MULTI_KEY_CONN but responder lacks MULTI_KEY_CAP\n"));
                     return libspdm_generate_error_response(
                         spdm_context,
                         SPDM_ERROR_CODE_INVALID_REQUEST, 0,
@@ -843,6 +917,9 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
     }
 
     status = libspdm_append_message_a(spdm_context, spdm_request, spdm_request_size);
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "rsp_algorithms: append_message_a(request) status=0x%x size=0x%zx\n",
+                   status, spdm_request_size));
     if (LIBSPDM_STATUS_IS_ERROR(status)) {
         return libspdm_generate_error_response(spdm_context,
                                                SPDM_ERROR_CODE_UNSPECIFIED, 0,
@@ -850,6 +927,9 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
     }
 
     status = libspdm_append_message_a(spdm_context, spdm_response, *response_size);
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "rsp_algorithms: append_message_a(response) status=0x%x size=0x%zx\n",
+                   status, *response_size));
     if (LIBSPDM_STATUS_IS_ERROR(status)) {
         return libspdm_generate_error_response(spdm_context,
                                                SPDM_ERROR_CODE_UNSPECIFIED, 0,
@@ -858,6 +938,8 @@ libspdm_return_t libspdm_get_response_algorithms(libspdm_context_t *spdm_context
 
     /* -=[Update State Phase]=- */
     libspdm_set_connection_state(spdm_context, LIBSPDM_CONNECTION_STATE_NEGOTIATED);
+    LIBSPDM_DEBUG((LIBSPDM_DEBUG_INFO,
+                   "rsp_algorithms: success -> connection_state NEGOTIATED\n"));
 
     return LIBSPDM_STATUS_SUCCESS;
 }
